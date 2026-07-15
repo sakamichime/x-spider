@@ -63,6 +63,7 @@ class Aria2 {
       this.#secret,
       '--rpc-listen-port',
       this.#port.toString(),
+      '--check-certificate=false',
     ];
     this.#command = Command.sidecar('binaries/aria2c', args);
     this.#log.info('Spawn with args:', args);

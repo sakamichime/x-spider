@@ -33,7 +33,7 @@ pub async fn network_fetch(
 
   // Build client
   let client = {
-    let mut b = reqwest::Client::builder();
+    let mut b = reqwest::Client::builder().danger_accept_invalid_certs(true);
 
     // Auto set proxy settings
     if enable_proxy {
@@ -111,15 +111,42 @@ pub async fn network_fetch(
 
 #[tauri::command]
 pub async fn network_get_system_proxy_url() -> Result<HashMap<String, String>, ()> {
-  let proxies = reqwest::get_system_proxy_map();
-  let mut mapped_proxies: HashMap<String, String> = HashMap::with_capacity(proxies.len());
+  use winreg::RegKey;
+  use winreg::enums::HKEY_CURRENT_USER;
 
-  for (key, value) in proxies {
-    mapped_proxies.insert(key.clone(), match value {
-      reqwest::ProxyScheme::Http { host, .. } => host.to_string(),
-      reqwest::ProxyScheme::Https { host, .. } => host.to_string(),
-    });
+  let mut result: HashMap<String, String> = HashMap::new();
+
+  let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+  let internet_settings = hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+
+  if let Ok(settings) = internet_settings {
+    // 检查是否启用代理
+    let proxy_enable: u32 = settings.get_value("ProxyEnable").unwrap_or(0);
+    if proxy_enable == 0 {
+      return Ok(result);
+    }
+
+    // 读取代理服务器地址
+    let proxy_server: String = match settings.get_value("ProxyServer") {
+      Ok(s) => s,
+      Err(_) => return Ok(result),
+    };
+
+    // 解析代理服务器字符串
+    // 格式可能是 "host:port" 或 "http=host:port;https=host:port"
+    if proxy_server.contains('=') {
+      // 多个代理配置，格式如 "http=127.0.0.1:8080;https=127.0.0.1:8080"
+      for part in proxy_server.split(';') {
+        if let Some((key, value)) = part.split_once('=') {
+          result.insert(key.to_lowercase(), value.to_string());
+        }
+      }
+    } else {
+      // 单一代理配置，格式如 "127.0.0.1:8080"
+      result.insert("http".to_string(), proxy_server.clone());
+      result.insert("https".to_string(), proxy_server);
+    }
   }
 
-  Ok(mapped_proxies)
+  Ok(result)
 }
